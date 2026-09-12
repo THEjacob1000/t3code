@@ -397,6 +397,7 @@ export function ReviewSheet(props: ReviewSheetProps) {
         })
       : null,
   );
+  const vcsTerminology = gitState.vcsTerminology;
   // The selection-based git hooks only apply when this review belongs to the
   // selected thread (it always does when reached from the thread's toolbar).
   const gitMenuAvailable =
@@ -422,6 +423,7 @@ export function ReviewSheet(props: ReviewSheetProps) {
     environmentId,
     threadId,
     reviewCache,
+    vcsKind: gitStatusQuery.data?.vcs?.kind ?? null,
   });
   useReviewDiffPrewarming({
     threadKey: reviewCache.threadKey,
@@ -588,8 +590,8 @@ export function ReviewSheet(props: ReviewSheetProps) {
       attributes: section ? undefined : { disabled: true },
     });
     const actions: MenuAction[] = [
-      sectionAction(sectionMenu.workingTree, "Working tree"),
-      sectionAction(sectionMenu.branchChanges, "Branch changes"),
+      sectionAction(sectionMenu.workingTree, vcsTerminology.workingTreeNounTitle),
+      sectionAction(sectionMenu.branchChanges, `${vcsTerminology.refNounTitle} changes`),
       sectionAction(sectionMenu.latestTurn, "Latest turn"),
     ];
 
@@ -800,7 +802,9 @@ export function ReviewSheet(props: ReviewSheetProps) {
                     }
                   }}
                 >
-                  <NativeHeaderToolbar.Label>Working tree</NativeHeaderToolbar.Label>
+                  <NativeHeaderToolbar.Label>
+                    {vcsTerminology.workingTreeNounTitle}
+                  </NativeHeaderToolbar.Label>
                 </NativeHeaderToolbar.MenuAction>
                 <NativeHeaderToolbar.MenuAction
                   disabled={sectionMenu.branchChanges === null}
@@ -811,7 +815,9 @@ export function ReviewSheet(props: ReviewSheetProps) {
                     }
                   }}
                 >
-                  <NativeHeaderToolbar.Label>Branch changes</NativeHeaderToolbar.Label>
+                  <NativeHeaderToolbar.Label>
+                    {`${vcsTerminology.refNounTitle} changes`}
+                  </NativeHeaderToolbar.Label>
                 </NativeHeaderToolbar.MenuAction>
                 <NativeHeaderToolbar.MenuAction
                   disabled={sectionMenu.latestTurn === null}

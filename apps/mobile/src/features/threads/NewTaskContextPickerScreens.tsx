@@ -2,6 +2,7 @@ import { MaterialListRow } from "../../components/MaterialListRow";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import type { VcsRef } from "@t3tools/client-runtime/state/vcs";
 import { resolveEnvironmentMachineKind } from "@t3tools/contracts";
+import type { VcsTerminology } from "@t3tools/shared/vcs";
 import { LegendList } from "@legendapp/list/react-native";
 import {
   isAtomCommandInterrupted,
@@ -308,8 +309,10 @@ export function NewTaskBranchPickerRouteScreen() {
           if (mountedRef.current && navigation.isFocused() && !isAtomCommandInterrupted(result)) {
             const error = squashAtomCommandFailure(result);
             Alert.alert(
-              "Could not switch branch",
-              error instanceof Error ? error.message : "The branch could not be checked out.",
+              `Could not switch ${flow.vcsTerminology.refNoun}`,
+              error instanceof Error
+                ? error.message
+                : `The ${flow.vcsTerminology.refNoun} could not be checked out.`,
             );
           }
           return;
@@ -345,7 +348,12 @@ export function NewTaskBranchPickerRouteScreen() {
 
   return (
     <BranchPickerScreen
-      title={flow.workspaceMode === "worktree" ? "Base branch" : "Branch"}
+      title={
+        flow.workspaceMode === "worktree"
+          ? `Base ${flow.vcsTerminology.refNoun}`
+          : flow.vcsTerminology.refNounTitle
+      }
+      terminology={flow.vcsTerminology}
       project={flow.selectedProject}
       branches={flow.filteredBranches}
       selectedBranchName={
@@ -379,6 +387,7 @@ export function NewTaskBranchPickerRouteScreen() {
 /** The searchable branch screen shared by new threads and scheduled tasks. */
 export function BranchPickerScreen(props: {
   readonly title: string;
+  readonly terminology: VcsTerminology;
   readonly project: EnvironmentProject | null;
   readonly branches: readonly VcsRef[];
   readonly selectedBranchName: string | null;
@@ -421,8 +430,11 @@ export function BranchPickerScreen(props: {
   const renderBranch = useCallback(
     ({ item, index }: { readonly item: VcsRef; readonly index: number }) => (
       <BranchSelectionRow
-        badge={branchBadgeLabel({ branch: item, project: props.project })}
-        branch={item}
+        badge={branchBadgeLabel({
+          branch: item,
+          project: props.project,
+          terminology: props.terminology,
+        })}        branch={item}
         disabled={props.selectionDisabled ?? false}
         isFirst={index === 0}
         isLast={index === props.branches.length - 1}
@@ -475,13 +487,12 @@ export function BranchPickerScreen(props: {
           {props.loading ? <ActivityIndicator /> : null}
           <Text className="text-center text-sm text-foreground-muted">
             {props.loading
-              ? "Loading branches…"
+              ? `Loading ${props.terminology.refNounPlural}…`
               : props.error
                 ? props.error
                 : props.query
-                  ? "No matching branches"
-                  : "No branches available"}
-          </Text>
+                  ? `No matching ${props.terminology.refNounPlural}`
+                  : `No ${props.terminology.refNounPlural} available`}          </Text>
           {!props.loading && props.error ? (
             <Pressable
               accessibilityRole="button"
@@ -535,13 +546,13 @@ export function BranchPickerScreen(props: {
           <TextInput
             autoCapitalize="none"
             autoCorrect={false}
-            accessibilityLabel="Find a branch"
+            accessibilityLabel={`Find a ${props.terminology.refNoun}`}
             className="h-12 rounded-full border border-input-border bg-input px-4 font-sans text-base text-foreground"
             selectionColorClassName="accent-primary/32"
             cursorColorClassName="accent-primary"
             selectionHandleColorClassName="accent-primary"
             onChangeText={props.onQueryChange}
-            placeholder="Find a branch"
+            placeholder={`Find a ${props.terminology.refNoun}`}
             placeholderTextColorClassName="accent-placeholder"
             value={props.query}
           />
@@ -561,8 +572,7 @@ export function BranchPickerScreen(props: {
             ? () => [
                 createNativeMailSearchToolbarItem({
                   onSearchTextChange: props.onQueryChange,
-                  placeholder: "Find a branch",
-                  searchTextChangeId: "new-task-branch-search-text",
+                  placeholder: `Find a ${props.terminology.refNoun}`,                  searchTextChangeId: "new-task-branch-search-text",
                   showsSearchDismissButton: true,
                 }),
               ]
@@ -574,7 +584,7 @@ export function BranchPickerScreen(props: {
                 autoCapitalize: "none",
                 hideNavigationBar: false,
                 obscureBackground: false,
-                placeholder: "Find a branch",
+                placeholder: `Find a ${props.terminology.refNoun}`,
                 onChangeText: (event) => {
                   props.onQueryChange(event.nativeEvent.text);
                 },
