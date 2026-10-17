@@ -11,7 +11,6 @@ import {
   SourceControlProviderError,
   SourceControlRepositoryError,
   type GitCommandFailureReason,
-  VcsUnsupportedOperationError,
   type SourceControlCloneRepositoryInput,
   type SourceControlCloneRepositoryResult,
   type SourceControlCloneProtocol,
@@ -25,11 +24,13 @@ import {
 
 import * as ServerConfig from "../config.ts";
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
+import * as JjWorkflow from "../jj/JjWorkflow.ts";
 import {
   parseGitCloneProgressLine,
   type GitCloneProgressLine,
 } from "../project/gitCloneProgress.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+import * as JjVcsDriver from "../vcs/JjVcsDriver.ts";
 import * as BitbucketApi from "@t3tools/source-control-bitbucket/server/BitbucketApi";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as SourceControlProviderRegistry from "./SourceControlProviderRegistry.ts";
@@ -216,6 +217,8 @@ export const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   const providers = yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
   const vcsRegistry = yield* VcsDriverRegistry.VcsDriverRegistry;
+  const jjWorkflow = yield* JjWorkflow.JjWorkflow;
+  const jjDriver = yield* JjVcsDriver.JjVcsDriver;
 
   const ensureConcreteProvider = (input: {
     readonly operation: string;
@@ -485,22 +488,27 @@ export const make = Effect.gen(function* () {
         operation: "publishRepository",
         provider: input.provider,
       });
-      const detected = yield* vcsRegistry.detect({ cwd: input.cwd, jjOnly: true });
-      if (detected?.kind === "jj") {
-        return yield* Effect.fail(
-          new SourceControlRepositoryError({
-            operation: "publishRepository",
-            provider: providerKind,
-            detail: "Publishing Jujutsu repositories is not supported.",
-            cause: new VcsUnsupportedOperationError({
-              operation: "publishRepository",
-              kind: "jj",
-              detail: "Publishing Jujutsu repositories is not supported.",
-            }),
-          }),
-        );
-      }
       const provider = yield* providers.get(providerKind);
+      const kind = yield* Effect.gen(function* () {
+        const handle = yield* vcsRegistry.detect({ cwd: input.cwd, jjOnly: true });
+        if (handle?.kind === "jj") {
+          yield* jjDriver.ensureUsable(
+            "SourceControlRepositoryService.publishRepository",
+            input.cwd,
+          );
+        }
+        return handle?.kind ?? null;
+      }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new SourceControlRepositoryError({
+              operation: "publishRepository",
+              provider: providerKind,
+              detail: "detail" in cause ? cause.detail : cause.message,
+              cause,
+            }),
+        ),
+      );
       const urls = yield* provider.createRepository({
         cwd: input.cwd,
         repository: input.repository.trim(),
@@ -508,6 +516,37 @@ export const make = Effect.gen(function* () {
       });
       const remoteUrl = selectRemoteUrl(urls, input.protocol);
       const preferredRemoteName = input.remoteName?.trim() || "origin";
+
+      // In a colocated Jujutsu repository Git's own HEAD is usually detached, so the Git path
+      // either fails confusingly or publishes `@-`.
+      if (kind === "jj") {
+        const published = yield* jjWorkflow
+          .publishRepository({
+            cwd: input.cwd,
+            remoteName: preferredRemoteName,
+            remoteUrl,
+            pushFailureDetail: (cause, remoteName) =>
+              publishPushFailureDetail({ urls, remoteName, remoteUrl, reason: cause.reason }),
+          })
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new SourceControlRepositoryError({
+                  operation: "publishRepository",
+                  provider: providerKind,
+                  detail: cause.detail,
+                  cause,
+                }),
+            ),
+          );
+        return {
+          repository: toRepositoryInfo(providerKind, urls),
+          remoteName: published.remoteName,
+          remoteUrl,
+          branch: published.refName,
+          status: published.status,
+        };
+      }
 
       const remoteName = yield* git.ensureRemote({
         cwd: input.cwd,
