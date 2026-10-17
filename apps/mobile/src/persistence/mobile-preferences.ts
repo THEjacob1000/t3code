@@ -68,6 +68,7 @@ export interface Preferences {
   readonly collapsedProjectGroups?: readonly string[];
   /** Environments whose "reclaim database space" notice was dismissed. */
   readonly dismissedDatabaseStorageNotices?: readonly string[];
+  readonly dismissedVcsNotices?: Readonly<Record<string, string>>;
   /** What the Return key does in the composer on a hardware keyboard. iOS only. */
   readonly composerEnterBehavior?: ComposerEnterBehavior;
   readonly followUpBehavior?: FollowUpBehavior;
@@ -142,6 +143,7 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     connectOnboardingOptOutAccounts?: ReadonlyArray<string>;
     collapsedProjectGroups?: readonly string[];
     dismissedDatabaseStorageNotices?: readonly string[];
+    dismissedVcsNotices?: Readonly<Record<string, string>>;
     composerEnterBehavior?: ComposerEnterBehavior;
     followUpBehavior?: FollowUpBehavior;
     microphones?: ReadonlyArray<MicrophoneEntry>;
@@ -223,6 +225,17 @@ function sanitizePreferences(parsed: Preferences): Preferences {
   if (Array.isArray(parsed.dismissedDatabaseStorageNotices)) {
     preferences.dismissedDatabaseStorageNotices = parsed.dismissedDatabaseStorageNotices.filter(
       (value): value is string => typeof value === "string",
+    );
+  }
+  if (
+    typeof parsed.dismissedVcsNotices === "object" &&
+    parsed.dismissedVcsNotices !== null &&
+    !Array.isArray(parsed.dismissedVcsNotices)
+  ) {
+    preferences.dismissedVcsNotices = Object.fromEntries(
+      Object.entries(parsed.dismissedVcsNotices).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string",
+      ),
     );
   }
   if (parsed.composerEnterBehavior === "send" || parsed.composerEnterBehavior === "newline") {

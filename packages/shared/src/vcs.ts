@@ -115,8 +115,6 @@ export const JJ_VCS_TERMINOLOGY: VcsTerminology = {
   preserveReviewSectionTitles: true,
 };
 
-export const DEFAULT_VCS_TERMINOLOGY = GIT_VCS_TERMINOLOGY;
-
 /** `null`/`undefined`/`"unknown"` resolve to Git terms so a transient status never flips copy. */
 export function getVcsTerminology(kind: VcsDriverKind | null | undefined): VcsTerminology {
   return kind === "jj" ? JJ_VCS_TERMINOLOGY : GIT_VCS_TERMINOLOGY;
@@ -133,7 +131,8 @@ export function resolveVcsTerminology(
 export function resolveVcsUnsupportedReason(
   status: Pick<VcsStatusLocalResult, "vcs"> | null | undefined,
 ): string | null {
-  return status?.vcs?.unsupportedReason ?? null;
+  const vcs = status?.vcs;
+  return vcs && "unsupportedReason" in vcs ? (vcs.unsupportedReason ?? null) : null;
 }
 
 /** Unknown status retains the original controls; only an explicit unsupported reason blocks them. */

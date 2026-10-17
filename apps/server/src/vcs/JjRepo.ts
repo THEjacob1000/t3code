@@ -52,6 +52,23 @@ export const isBareGitRepository = Effect.fn("JjRepo.isBareGitRepository")(funct
   );
 });
 
+/** A gitdir file alone can also be a submodule or separate Git directory, not a linked worktree. */
+export const isGitLinkedWorktree = Effect.fn("JjRepo.isGitLinkedWorktree")(function* (
+  fileSystem: FileSystem.FileSystem,
+  path: Path.Path,
+  workspaceRoot: string,
+): Effect.fn.Return<boolean, never> {
+  const pointer = yield* fileSystem
+    .readFileString(path.join(workspaceRoot, ".git"))
+    .pipe(Effect.orElseSucceed(() => ""));
+  const gitDir = /^gitdir:\s*(.+)$/m.exec(pointer)?.[1]?.trim();
+  if (!gitDir) return false;
+  return yield* fileSystem.stat(path.join(path.resolve(workspaceRoot, gitDir), "commondir")).pipe(
+    Effect.map((info) => info.type === "File"),
+    Effect.orElseSucceed(() => false),
+  );
+});
+
 /**
  * Walks up from `cwd` and stops at the FIRST directory holding `.jj`, `.git`, or a bare Git
  * directory. Pure filesystem, no subprocess. A nearer Git repository outranks a `.jj` further up,

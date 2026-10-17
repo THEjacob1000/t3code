@@ -55,6 +55,7 @@ import {
   useLinkedPullRequestLines,
 } from "../LinkedPullRequestList";
 import { useLinkedPullRequestActions } from "../useLinkedPullRequestActions";
+import { VcsFallbackNotice } from "../VcsFallbackNotice";
 
 const HEADER_SCROLL_EDGE_EFFECTS = nativeHeaderScrollEdgeEffects(Platform.OS, Platform.Version);
 
@@ -265,6 +266,14 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
         ) : undefined
       }
     >
+      {gitStatus.data?.vcs?.kind === "git" && selectedThreadProject?.workspaceRoot ? (
+        <VcsFallbackNotice
+          environmentId={environmentId}
+          repository={selectedThreadProject.workspaceRoot}
+          notice={gitStatus.data.vcs.notice}
+          reason={vcsUnsupportedReason}
+        />
+      ) : null}
       {vcsUnsupportedReason ? (
         <Text accessibilityRole="alert" className="text-warning-foreground">
           {vcsUnsupportedReason}

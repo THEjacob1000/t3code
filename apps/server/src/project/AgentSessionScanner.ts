@@ -1214,6 +1214,21 @@ export const make = Effect.gen(function* () {
     const { candidates: raw, truncated } = yield* collectCandidates();
     cachedCandidates = raw;
 
+    // Resolve persisted roots too. A project and a transcript can name
+    // different symlinks to the same directory.
+    const importedProjects = yield* projectStore
+      .listShells()
+      .pipe(
+        Effect.mapError(
+          (cause) => new AgentSessionScanError({ operation: "read-projects", cause }),
+        ),
+      );
+    const importedProjectsByRoot = new Map<string, (typeof importedProjects)[number]>();
+    for (const project of importedProjects) {
+      const projectRoot = path.resolve(expandHomePath(project.workspaceRoot, homeDir));
+      importedProjectsByRoot.set(normalizeProjectPathForComparison(projectRoot), project);
+      importedProjectsByRoot.set(yield* directoryIdentity(projectRoot), project);
+    }
     const merged = new Map<
       string,
       {
@@ -1244,10 +1259,31 @@ export const make = Effect.gen(function* () {
           .pipe(Effect.orElseSucceed(() => resolved));
         // A symlink can point into the worktrees directory even when its own
         // spelling doesn't; check again with links resolved.
+        const handle = yield* vcsRegistry
+          .detect({ cwd: realPath, jjOnly: true })
+          .pipe(Effect.orElseSucceed(() => null));
+        const jjPaths =
+          handle?.kind === "jj"
+            ? yield* resolveJjRepoPaths(fileSystem, path, handle.repository.rootPath).pipe(
+                Effect.orElseSucceed(() => null),
+              )
+            : null;
+        if (
+          jjPaths !== null &&
+          jjPaths.workspaceRoot !== jjPaths.mainWorkspaceRoot &&
+          !importedProjectsByRoot.has(yield* directoryIdentity(realPath))
+        ) {
+          directoryKeys.set(resolved, "");
+          continue;
+        }
         if (isExcludedProjectPath(realPath)) {
           key = "";
         } else {
-          const gitIdentity = yield* readGitIdentity(resolved);
+          const gitIdentity = yield* readGitIdentity(
+            jjPaths !== null && jjPaths.workspaceRoot !== jjPaths.mainWorkspaceRoot
+              ? jjPaths.mainWorkspaceRoot
+              : resolved,
+          );
           if (gitIdentity._tag === "Worktree") {
             key = "";
           } else {
@@ -1278,22 +1314,6 @@ export const make = Effect.gen(function* () {
         existing.lastActiveAtMs === null || candidate.lastActiveAtMs === null
           ? (existing.lastActiveAtMs ?? candidate.lastActiveAtMs)
           : Math.max(existing.lastActiveAtMs, candidate.lastActiveAtMs);
-    }
-
-    // Resolve persisted roots too. A project and a transcript can name
-    // different symlinks to the same directory.
-    const importedProjects = yield* projectStore
-      .listShells()
-      .pipe(
-        Effect.mapError(
-          (cause) => new AgentSessionScanError({ operation: "read-projects", cause }),
-        ),
-      );
-    const importedProjectsByRoot = new Map<string, (typeof importedProjects)[number]>();
-    for (const project of importedProjects) {
-      const projectRoot = path.resolve(expandHomePath(project.workspaceRoot, homeDir));
-      importedProjectsByRoot.set(normalizeProjectPathForComparison(projectRoot), project);
-      importedProjectsByRoot.set(yield* directoryIdentity(projectRoot), project);
     }
 
     const candidates: Array<AgentSessionProjectCandidate> = [];
