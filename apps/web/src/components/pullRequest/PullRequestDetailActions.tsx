@@ -73,6 +73,7 @@ export function ActOnEnvironmentPicker({
 }
 
 export function PullRequestCheckoutMenu({
+  workspaceNoun,
   handoff,
   checkoutRoot,
   canPrepareWorktree,
@@ -82,6 +83,7 @@ export function PullRequestCheckoutMenu({
   actingEnvironmentId,
   onActingEnvironmentChange,
 }: {
+  workspaceNoun: string;
   handoff: string | null;
   checkoutRoot: string | null;
   canPrepareWorktree: boolean;
@@ -120,7 +122,7 @@ export function PullRequestCheckoutMenu({
         <MenuItem disabled={!canPrepareWorktree} onClick={() => onCheckout("worktree")}>
           <GitBranchIcon className="mt-1 size-3.5 shrink-0 self-start" />
           <span className="flex min-w-0 flex-col">
-            <span>In a separate worktree</span>
+            <span>In a separate {workspaceNoun}</span>
             <span className="text-xs text-muted-foreground">
               Its own folder and thread. Nothing you have open moves.
             </span>

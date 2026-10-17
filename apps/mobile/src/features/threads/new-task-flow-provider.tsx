@@ -29,6 +29,8 @@ import { threadContextsOutsideEnvironment } from "@t3tools/shared/composerContex
 import { resolveNewThreadEnvMode, resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { parseT3ProjectFile } from "@t3tools/shared/t3ProjectFile";
 import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
+import { AsyncResult } from "effect/reactivity";
 import { pipe } from "effect/Function";
 
 import {
@@ -82,6 +84,13 @@ import {
 } from "../../state/use-model-option-memory";
 import { useBranches, useDebouncedValue, usePaginatedBranches } from "../../state/queries";
 import { vcsEnvironment } from "../../state/vcs";
+import {
+  GIT_VCS_TERMINOLOGY,
+  resolveVcsTerminology,
+  resolveVcsUnsupportedReason,
+  supportsVcsActions,
+  type VcsTerminology,
+} from "@t3tools/shared/vcs";
 import {
   flattenQueuedThreadMessages,
   threadOutboxManager,
@@ -149,12 +158,13 @@ function findQueuedPendingTask(messageId: string): QueuedThreadMessage | null {
 export function branchBadgeLabel(input: {
   readonly branch: VcsRef;
   readonly project: EnvironmentProject | null;
+  readonly terminology?: VcsTerminology;
 }): string | null {
   if (input.branch.current) {
     return "current";
   }
   if (input.branch.worktreePath && input.branch.worktreePath !== input.project?.workspaceRoot) {
-    return "worktree";
+    return (input.terminology ?? GIT_VCS_TERMINOLOGY).workspaceNoun;
   }
   if (input.branch.isRemote) {
     return "remote";
@@ -191,6 +201,10 @@ type NewTaskFlowContextValue = {
   readonly hasMoreBranches: boolean;
   readonly availableBranches: ReadonlyArray<VcsRef>;
   readonly currentCheckoutBranchName: string | null;
+  readonly vcsTerminology: VcsTerminology;
+  readonly vcsActionsSupported: boolean;
+  readonly vcsUnsupportedReason: string | null;
+  readonly canUseVcsActions: (worktreePath?: string | null) => boolean;
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
   readonly planModeEnabled: boolean;
@@ -476,6 +490,7 @@ export function NewTaskFlowProvider(
       : null,
   );
   const currentCheckoutBranchName = projectGitStatus.data?.refName ?? null;
+  const vcsTerminology = resolveVcsTerminology(projectGitStatus.data);
   // The unfiltered ref list also provides repository capability while offline.
   const projectBranches = useBranches({
     environmentId: selectedProject?.environmentId ?? null,
@@ -553,6 +568,36 @@ export function NewTaskFlowProvider(
   const workspaceMode = workspaceSelection.mode;
   const selectedBranchName = workspaceSelection.branch;
   const selectedWorktreePath = workspaceSelection.worktreePath;
+  const selectedWorkspaceStatus = useEnvironmentQuery(
+    selectedProject !== null && selectedWorktreePath !== null
+      ? vcsEnvironment.status({
+          environmentId: selectedProject.environmentId,
+          input: { cwd: selectedWorktreePath, includeRemote: false },
+        })
+      : null,
+  );
+  const vcsActionsSupported =
+    supportsVcsActions(projectGitStatus.data) && supportsVcsActions(selectedWorkspaceStatus.data);
+  const vcsUnsupportedReason =
+    resolveVcsUnsupportedReason(projectGitStatus.data) ??
+    resolveVcsUnsupportedReason(selectedWorkspaceStatus.data);
+  const canUseVcsActions = (worktreePath?: string | null) => {
+    if (selectedProject === null) return true;
+    return [selectedProject.workspaceRoot, selectedWorktreePath, worktreePath].every((cwd) => {
+      if (!cwd) return true;
+      const status = appAtomRegistry.get(
+        vcsEnvironment.status({
+          environmentId: selectedProject.environmentId,
+          input: {
+            cwd,
+            ...(cwd !== selectedProject.workspaceRoot ? { includeRemote: false } : {}),
+          },
+        }),
+      );
+      return supportsVcsActions(Option.getOrNull(AsyncResult.value(status)));
+    });
+  };
+
   // Keep the user's explicit choice separate from the resolved display value:
   // only the explicit flag is ever written back to the draft, so the resolved
   // value keeps tracking the server setting when the config loads late.
@@ -803,7 +848,7 @@ export function NewTaskFlowProvider(
   };
 
   const setWorkspaceMode = (mode: WorkspaceMode) => {
-    if (!selectedProjectDraftKey) {
+    if (!selectedProjectDraftKey || (mode === "worktree" && !canUseVcsActions())) {
       return;
     }
     if (!selectedProject) {
@@ -830,6 +875,7 @@ export function NewTaskFlowProvider(
 
   useEffect(() => {
     if (
+      !vcsActionsSupported ||
       workspaceMode !== "local" ||
       !selectedProject ||
       !selectedProjectDraftKey ||
@@ -856,6 +902,7 @@ export function NewTaskFlowProvider(
     });
   }, [
     availableBranches,
+    vcsActionsSupported,
     draftStartFromOrigin,
     selectedProject,
     selectedProjectDraftKey,
@@ -863,7 +910,11 @@ export function NewTaskFlowProvider(
   ]);
 
   const selectBranch = (branch: VcsRef) => {
-    if (!selectedProject || !selectedProjectDraftKey) {
+    if (
+      !selectedProject ||
+      !selectedProjectDraftKey ||
+      !canUseVcsActions(workspaceMode === "local" ? branch.worktreePath : null)
+    ) {
       return;
     }
     pendingLocalBranchSyncDraftKeysRef.current.delete(selectedProjectDraftKey);
@@ -882,7 +933,7 @@ export function NewTaskFlowProvider(
   };
 
   const setStartFromOrigin = (value: boolean) => {
-    if (!selectedProjectDraftKey) {
+    if (!selectedProjectDraftKey || !canUseVcsActions()) {
       return;
     }
     updateComposerDraftSettings(selectedProjectDraftKey, {
@@ -1019,6 +1070,12 @@ export function NewTaskFlowProvider(
       isGitRepo,
     });
     const mode = workspaceSelection.mode;
+    if (
+      (mode === "worktree" || workspaceSelection?.pullRequestReference) &&
+      !canUseVcsActions(mode === "local" ? workspaceSelection?.worktreePath : null)
+    ) {
+      return null;
+    }
     // When the selection is the stand-in built from the queued snapshot,
     // persist the original (possibly absent) snapshot values — the
     // stand-in's placeholder title/workspaceRoot must never be written back
@@ -1210,6 +1267,10 @@ export function NewTaskFlowProvider(
     selectedProviderStatus,
     providerGroups,
     filteredBranches,
+    vcsTerminology,
+    vcsActionsSupported,
+    vcsUnsupportedReason,
+    canUseVcsActions,
     reset,
     setProject,
     openDraft,
